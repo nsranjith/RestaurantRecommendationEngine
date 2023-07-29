@@ -1,0 +1,312 @@
+import java.util.*;
+
+public class tester {
+
+    private int[][] SHIP_MAP;
+    private Map<String, Integer> SHIP_INFO;
+    private Map<String, List<int[]>> SHIP_COORDINATE_DICT;
+    private Map<int[], String> COORDINATE_SHIP_DICT;
+    private List<int[]> SUNK_SHIP_COORDINATES;
+    private int[][] SHOT_MAP;
+    private int[][] PROB_MAP;
+
+    private boolean hunt;
+    private List<int[]> targets;
+    private int SCORE;
+    private int NUM_GUESSES;
+    private int GUESS_DELAY;
+    private final int GUESS_EVENT = 1000; // Unique ID for user event
+
+    private final int BOARD_X = 25;
+    private final int BOARD_Y = 10;
+    private boolean GAME_OVER;
+
+    public Battleship() {
+        SHIP_MAP = new int[10][10];
+        SHIP_INFO = new HashMap<>();
+        SHIP_INFO.put("Carrier", 5);
+        SHIP_INFO.put("Battleship", 4);
+        SHIP_INFO.put("Destroyer", 3);
+        SHIP_INFO.put("Submarine", 3);
+        SHIP_INFO.put("Patrol Boat", 2);
+        SHIP_COORDINATE_DICT = new HashMap<>();
+        COORDINATE_SHIP_DICT = new HashMap<>();
+        SUNK_SHIP_COORDINATES = new ArrayList<>();
+        SHOT_MAP = new int[10][10];
+        PROB_MAP = new int[10][10];
+
+        hunt = true;
+        targets = new ArrayList<>();
+        SCORE = 0;
+        NUM_GUESSES = 0;
+        GUESS_DELAY = 250;
+        GAME_OVER = false;
+
+        Timer timer = new Timer();
+        timer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                guess();
+            }
+        }, GUESS_DELAY, GUESS_DELAY);
+    }
+
+    private void placeShips() {
+        Random random = new Random();
+        for (String ship : SHIP_INFO.keySet()) {
+            int shipSize = SHIP_INFO.get(ship);
+            while (true) {
+                int startRow = random.nextInt(10);
+                int startCol = random.nextInt(10);
+                String[] constAxisOptions = {"row", "col"};
+                String constAxis = constAxisOptions[random.nextInt(2)];
+                String[] directionOptions = {"up", "down"};
+                String direction = directionOptions[random.nextInt(2)];
+                int endRow, endCol;
+
+                if (constAxis.equals("row")) {
+                    if (direction.equals("up") && startCol - shipSize >= 0) {
+                        endRow = startRow + 1;
+                        endCol = startCol - shipSize;
+                        int temp = startCol;
+                        startCol = endCol;
+                        endCol = temp;
+                    } else if (direction.equals("down") && startCol + shipSize <= 9) {
+                        endRow = startRow + 1;
+                        endCol = startCol + shipSize;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    if (direction.equals("up") && startRow - shipSize >= 0) {
+                        endRow = startRow - shipSize;
+                        int temp = startRow;
+                        startRow = endRow;
+                        endRow = temp;
+                        endCol = startCol + 1;
+                    } else if (direction.equals("down") && startRow + shipSize <= 9) {
+                        endRow = startRow + shipSize;
+                        endCol = startCol + 1;
+                    } else {
+                        continue;
+                    }
+                }
+
+                boolean canPlace = true;
+                for (int row = startRow; row < endRow; row++) {
+                    for (int col = startCol; col < endCol; col++) {
+                        if (SHIP_MAP[row][col] != 0) {
+                            canPlace = false;
+                            break;
+                        }
+                    }
+                    if (!canPlace) {
+                        break;
+                    }
+                }
+
+                if (canPlace) {
+                    for (int row = startRow; row < endRow; row++) {
+                        for (int col = startCol; col < endCol; col++) {
+                            SHIP_MAP[row][col] = 1;
+                            if (constAxis.equals("row")) {
+                                SHIP_COORDINATE_DICT.computeIfAbsent(ship, k -> new ArrayList<>())
+                                                   .add(new int[]{startRow, col});
+                                COORDINATE_SHIP_DICT.put(new int[]{startRow, col}, ship);
+                            } else {
+                                SHIP_COORDINATE_DICT.computeIfAbsent(ship, k -> new ArrayList<>())
+                                                   .add(new int[]{row, startCol});
+                                COORDINATE_SHIP_DICT.put(new int[]{row, startCol}, ship);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    private void genProbMap() {
+        PROB_MAP = new int[10][10];
+
+        for (String ship : new HashSet<>(COORDINATE_SHIP_DICT.values())) {
+            int shipSize = SHIP_INFO.get(ship);
+            int useSize = shipSize - 1;
+
+            for (int row = 0; row < 10; row++) {
+                for (int col = 0; col < 10; col++) {
+                    if (SHOT_MAP[row][col] != 1) {
+                        List<int[]> endpoints = new ArrayList<>();
+                        if (row - useSize >= 0) {
+                            endpoints.add(new int[]{row - useSize, col, row + 1, col + 1});
+                        }
+                        if (row + useSize <= 9) {
+                            endpoints.add(new int[]{row, col, row + useSize + 1, col + 1});
+                        }
+                        if (col - useSize >= 0) {
+                            endpoints.add(new int[]{row, col - useSize, row + 1, col + 1});
+                        }
+                        if (col + useSize <= 9) {
+                            endpoints.add(new int[]{row, col, row + 1, col + useSize + 1});
+                        }
+
+                        for (int[] endpoint : endpoints) {
+                            int startRow = endpoint[0];
+                            int startCol = endpoint[1];
+                            int endRow = endpoint[2];
+                            int endCol = endpoint[3];
+                            boolean canPlace = true;
+                            for (int r = startRow; r < endRow; r++) {
+                                for (int c = startCol; c < endCol; c++) {
+                                    if (SHOT_MAP[r][c] != 0) {
+                                        canPlace = false;
+                                        break;
+                                    }
+                                }
+                                if (!canPlace) {
+                                    break;
+                                }
+                            }
+
+                            if (canPlace) {
+                                for (int r = startRow; r < endRow; r++) {
+                                    for (int c = startCol; c < endCol; c++) {
+                                        PROB_MAP[r][c]++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (SHOT_MAP[row][col] == 1 && SHIP_MAP[row][col] == 1 && !SUNK_SHIP_COORDINATES.contains(new int[]{row, col})) {
+                        if (row + 1 <= 9 && SHOT_MAP[row + 1][col] == 0) {
+                            if (row - 1 >= 0 && !SUNK_SHIP_COORDINATES.contains(new int[]{row - 1, col}) && SHOT_MAP[row - 1][col] == SHIP_MAP[row - 1][col]) {
+                                PROB_MAP[row + 1][col] += 15;
+                            } else {
+                                PROB_MAP[row + 1][col] += 10;
+                            }
+                        }
+
+                        if (row - 1 >= 0 && SHOT_MAP[row - 1][col] == 0) {
+                            if (row + 1 <= 9 && !SUNK_SHIP_COORDINATES.contains(new int[]{row + 1, col}) && SHOT_MAP[row + 1][col] == SHIP_MAP[row + 1][col]) {
+                                PROB_MAP[row - 1][col] += 15;
+                            } else {
+                                PROB_MAP[row - 1][col] += 10;
+                            }
+                        }
+
+                        if (col + 1 <= 9 && SHOT_MAP[row][col + 1] == 0) {
+                            if (col - 1 >= 0 && !SUNK_SHIP_COORDINATES.contains(new int[]{row, col - 1}) && SHOT_MAP[row][col - 1] == SHIP_MAP[row][col - 1]) {
+                                PROB_MAP[row][col + 1] += 15;
+                            } else {
+                                PROB_MAP[row][col + 1] += 10;
+                            }
+                        }
+
+                        if (col - 1 >= 0 && SHOT_MAP[row][col - 1] == 0) {
+                            if (col + 1 <= 9 && !SUNK_SHIP_COORDINATES.contains(new int[]{row, col + 1}) && SHOT_MAP[row][col + 1] == SHIP_MAP[row][col + 1]) {
+                                PROB_MAP[row][col - 1] += 15;
+                            } else {
+                                PROB_MAP[row][col - 1] += 10;
+                            }
+                        }
+                    } else if (SHOT_MAP[row][col] == 1 && SHIP_MAP[row][col] != 1) {
+                        PROB_MAP[row][col] = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    private int[] guessRandom(int length) {
+        Random random = new Random();
+        int[] guess = new int[2];
+        while (true) {
+            guess[0] = random.nextInt(10);
+            guess[1] = random.nextInt(10);
+            if ((guess[0] + guess[1]) % length == 0 && SHOT_MAP[guess[0]][guess[1]] == 0) {
+                break;
+            }
+        }
+        return guess;
+    }
+
+    private int[] huntTarget(int length) {
+        int[] guess;
+        if (targets.isEmpty()) {
+            guess = guessRandom(length);
+        } else {
+            guess = targets.remove(targets.size() - 1);
+        }
+
+        if (SHIP_MAP[guess[0]][guess[1]] == 1) {
+            int[][] potentialTargets = {
+                {guess[0] + 1, guess[1]}, {guess[0], guess[1] + 1},
+                {guess[0] - 1, guess[1]}, {guess[0], guess[1] - 1}
+            };
+
+            for (int[] target : potentialTargets) {
+                if (target[0] >= 0 && target[0] <= 9 && target[1] >= 0 && target[1] <= 9
+                        && SHOT_MAP[target[0]][target[1]] == 0 && !targets.contains(target)) {
+                    targets.add(target);
+                }
+            }
+        }
+
+        return guess;
+    }
+
+    private int[] guessProb() {
+        genProbMap();
+        int[] maxIndices = getMaxIndices(PROB_MAP);
+        return new int[]{maxIndices[0], maxIndices[1]};
+    }
+
+    private int[] getMaxIndices(int[][] array) {
+        int maxVal = array[0][0];
+        int row = 0;
+        int col = 0;
+        for (int i = 0; i < array.length; i++) {
+            for (int j = 0; j < array[0].length; j++) {
+                if (array[i][j] > maxVal) {
+                    maxVal = array[i][j];
+                    row = i;
+                    col = j;
+                }
+            }
+        }
+        return new int[]{row, col};
+    }
+
+    private void shoot(int guessRow, int guessCol) {
+        SHOT_MAP[guessRow][guessCol] = 1;
+        NUM_GUESSES++;
+
+        if (SHIP_MAP[guessRow][guessCol] == 1) {
+            SCORE++;
+            int[] coord = new int[]{guessRow, guessCol};
+            String ship = COORDINATE_SHIP_DICT.remove(coord);
+            if (!COORDINATE_SHIP_DICT.values().contains(ship)) {
+                SUNK_SHIP_COORDINATES.addAll(SHIP_COORDINATE_DICT.remove(ship));
+            }
+        }
+
+        if (SCORE == SHIP_INFO.size()) {
+            GAME_OVER = true;
+        }
+    }
+
+    private void guess() {
+        int[] guess;
+        if (hunt) {
+            guess = huntTarget(2);
+        } else {
+            guess = guessProb();
+        }
+        shoot(guess[0], guess[1]);
+    }
+
+    public static void main(String[] args) {
+        Battleship battleship = new Battleship();
+    }
+}
